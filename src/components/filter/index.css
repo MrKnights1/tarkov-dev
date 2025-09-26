@@ -11,7 +11,8 @@
     transform-origin: top;
     transform: scaleY(0);
     transition: transform 0.26s ease;
-    z-index: 1;
+    /* Raise stacking context so the filter and its controls can appear above page content */
+    z-index: 1000;
 }
 
 .filter-wrapper.full-width {
@@ -50,7 +51,26 @@
     position: fixed;
     right: 20px;
     width: 6vh;
-    z-index: 1;
+    /* Make sure the toggle button sits above the filter when needed */
+    z-index: 1001;
+}
+
+/* Ensure react-select controls and menus in the filter stack above other elements.
+   Some react-select menus are rendered into a portal (body); adding global rules
+   here ensures consistent stacking regardless of portal usage. */
+.basic-multi-select .select__control {
+    z-index: 1002;
+}
+
+.basic-multi-select .select__menu,
+.basic-multi-select .select__menu-list {
+    z-index: 9999; /* match inline portal z-index used in SelectFilter */
+}
+
+/* Also cover portal-mounted menus which are rendered as siblings under <body> */
+.select__menu,
+.select__menu-list {
+    z-index: 9999 !important;
 }
 
 .filter-toggle-icon-wrapper svg {
