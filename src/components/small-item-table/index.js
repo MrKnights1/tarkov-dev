@@ -182,6 +182,32 @@ const ConditionalWrapper = ({ condition, wrapper, children }) => {
     return condition ? wrapper(children) : children;
 };
 
+const formatSignedNumber = (value, decimals = 1) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+        return '0';
+    }
+    let rounded = Number(value.toFixed(decimals));
+    if (Object.is(rounded, -0)) {
+        rounded = 0;
+    }
+    const stringValue = decimals > 0 ? rounded.toFixed(decimals) : rounded.toString();
+    const cleaned = decimals > 0 ? stringValue.replace(/\.0+$/, '') : stringValue;
+    const prefix = rounded > 0 ? '+' : '';
+    return `${prefix}${cleaned}`;
+};
+
+const formatErgonomicsValue = (value) => {
+    return formatSignedNumber(value, 1);
+};
+
+const formatRecoilValue = (value) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+        return '0%';
+    }
+    const formatted = formatSignedNumber(value * 100, 1);
+    return `${formatted}%`;
+};
+
 function SmallItemTable(props) {
     let {
         // common
@@ -276,10 +302,15 @@ function SmallItemTable(props) {
         softArmorFilter,
         plateArmorFilter,
         customFilter,
+        combineAttachmentStats = [],
+        combineAttachmentStatsFilter,
     } = props;
     const { t } = useTranslation();
     const settings = useSelector((state) => state.settings[state.settings.gameMode]);
     const skills = useSelector(selectAllSkills);
+
+    const shouldCombineAttachmentStats =
+        Array.isArray(combineAttachmentStats) && combineAttachmentStats.length > 0;
 
     const { data: meta } = useMetaData();
     const { materialDestructibilityMap, materialRepairabilityMap } = useMemo(() => {
@@ -522,6 +553,65 @@ function SmallItemTable(props) {
                 );
             }
 
+            if (shouldCombineAttachmentStats) {
+                const passesFilter =
+                    typeof combineAttachmentStatsFilter === 'function'
+                        ? combineAttachmentStatsFilter(formattedItem, itemData)
+                        : true;
+                if (passesFilter) {
+                    const parentCandidates = getAttachmentPoints(items, formattedItem, gunsCache);
+                    const uniqueParents = new Map();
+                    parentCandidates.forEach((parent) => {
+                        if (!uniqueParents.has(parent.id)) {
+                            uniqueParents.set(parent.id, parent);
+                        }
+                    });
+                    const parentItems = Array.from(uniqueParents.values()).filter((parent) => {
+                        if (!Array.isArray(parent.fitsTo) || parent.fitsTo.length === 0) {
+                            return false;
+                        }
+                        if (attachesToItemFilter) {
+                            return parent.fitsTo.some((gun) => gun.id === attachesToItemFilter.id);
+                        }
+                        return true;
+                    });
+                    if (parentItems.length > 0) {
+                        formattedItem.attachmentStatTotals = {};
+                        combineAttachmentStats.forEach((statName) => {
+                            const baseValue = formattedItem.properties?.[statName] ?? 0;
+                            const contributions = parentItems.map((parent) => {
+                                const parentValue = parent.properties?.[statName] ?? 0;
+                                const total = baseValue + parentValue;
+                                return {
+                                    parentId: parent.id,
+                                    parentName: parent.name,
+                                    parentNormalizedName: parent.normalizedName,
+                                    parentTypes: parent.types,
+                                    parentValue,
+                                    total,
+                                };
+                            });
+                            if (contributions.length > 0) {
+                                const totals = contributions.map((entry) => entry.total);
+                                formattedItem.attachmentStatTotals[statName] = {
+                                    base: baseValue,
+                                    min: Math.min(...totals),
+                                    max: Math.max(...totals),
+                                    totals,
+                                    contributions,
+                                };
+                            }
+                        });
+                        if (
+                            formattedItem.attachmentStatTotals &&
+                            Object.keys(formattedItem.attachmentStatTotals).length === 0
+                        ) {
+                            delete formattedItem.attachmentStatTotals;
+                        }
+                    }
+                }
+            }
+
             return formattedItem;
         };
         let returnData = items
@@ -627,6 +717,12 @@ function SmallItemTable(props) {
                 let categoriesFilter = handbookCategoryFilter;
                 if (!Array.isArray(categoriesFilter)) {
                     categoriesFilter = [categoriesFilter];
+                }
+
+                // Exclude items that have the word 'adapter' in their name from
+                // top-level handbook listings (so adapters only appear as attachments).
+                if (typeof item.name === 'string' && /\badapter\b/i.test(item.name)) {
+                    return false;
                 }
 
                 return item.handbookCategories.some((category) =>
@@ -1063,6 +1159,9 @@ function SmallItemTable(props) {
         energyCost,
         provisionValue,
         skills,
+        combineAttachmentStats,
+        combineAttachmentStatsFilter,
+        shouldCombineAttachmentStats,
     ]);
     const lowHydrationCost = useMemo(() => {
         if (!totalEnergyCost && !provisionValue) {
@@ -1858,7 +1957,15 @@ function SmallItemTable(props) {
             useColumns.push({
                 Header: t('Ergonomics'),
                 id: 'ergonomics',
-                accessor: (item) => item.properties.ergonomics,
+                accessor: (item) => {
+                    const combined = item.attachmentStatTotals?.ergonomics;
+                    // Use the combined min for sorting/values when available.
+                    // The Cell renderer will still only show combined totals for top-level rows.
+                    if (combined) {
+                        return combined.min;
+                    }
+                    return item.properties.ergonomics;
+                },
                 sortType: (a, b, columnId, desc) => {
                     const aErgo = a.values.ergonomics;
                     const bErgo = b.values.ergonomics;
@@ -1869,7 +1976,56 @@ function SmallItemTable(props) {
 
                     return aErgo - bErgo;
                 },
-                Cell: CenterCell,
+                Cell: ({ row, value }) => {
+                    const own = row.original.properties?.ergonomics;
+                    const combined = row.original.attachmentStatTotals?.ergonomics;
+                    const ownDisplay = typeof own === 'number' ? formatErgonomicsValue(own) : '-';
+
+                    // Only show combined attachment totals for top-level (parent) rows.
+                    if (combined && row.depth === 0) {
+                        const minVal = combined.min ?? 0;
+                        const maxVal = combined.max ?? 0;
+                        const minDisplay = formatErgonomicsValue(minVal);
+                        const maxDisplay = formatErgonomicsValue(maxVal);
+                        let combinedDisplay;
+                        if (minVal === maxVal) {
+                            combinedDisplay = minDisplay;
+                        } else {
+                            // Show the value with the smaller magnitude first (closer to zero),
+                            // e.g. display "-8…-21" instead of "-21…-8" for penalties.
+                            if (Math.abs(minVal) <= Math.abs(maxVal)) {
+                                combinedDisplay = `${minDisplay} to ${maxDisplay}`;
+                            } else {
+                                combinedDisplay = `${maxDisplay} to ${minDisplay}`;
+                            }
+                        }
+                        const tooltipContent = (
+                            <div>
+                                <div>
+                                    {row.original.name}: {formatErgonomicsValue(combined.base ?? 0)}
+                                </div>
+                                {combined.contributions.map((combo) => (
+                                    <div key={`${combo.parentId}-${combo.total}`}>
+                                        {combo.parentName}:{' '}
+                                        {formatErgonomicsValue(combo.parentValue ?? 0)} →{' '}
+                                        {formatErgonomicsValue(combo.total ?? 0)}
+                                    </div>
+                                ))}
+                            </div>
+                        );
+                        return (
+                            <Tooltip placement="bottom" title={tooltipContent} arrow>
+                                <CenterCell nowrap>
+                                    <div>{ownDisplay}</div>
+                                    <div style={{ fontSize: '0.85em', opacity: 0.85 }}>
+                                        {t('barrel-attachment-combined-label')}: {combinedDisplay}
+                                    </div>
+                                </CenterCell>
+                            </Tooltip>
+                        );
+                    }
+                    return <CenterCell nowrap value={ownDisplay} />;
+                },
                 position: ergonomics,
             });
         }
@@ -1911,17 +2067,72 @@ function SmallItemTable(props) {
             useColumns.push({
                 Header: t('Recoil'),
                 id: 'recoilModifier',
-                accessor: (item) => item.properties.recoilModifier,
+                accessor: (item) => {
+                    const combined = item.attachmentStatTotals?.recoilModifier;
+                    if (combined) {
+                        return combined.min;
+                    }
+                    return item.properties.recoilModifier;
+                },
                 sortType: (a, b) => {
                     return b.values.recoilModifier - a.values.recoilModifier;
                 },
-                Cell: ({ value }) => {
-                    if (!value) {
-                        value = '-';
-                    } else {
-                        value = `${Math.round(value * 100)}%`;
+                Cell: ({ row, value }) => {
+                    const own = row.original.properties?.recoilModifier;
+                    // Only consider combined totals for top-level rows; hide for child rows.
+                    const combined =
+                        row.depth === 0
+                            ? row.original.attachmentStatTotals?.recoilModifier
+                            : undefined;
+                    const ownDisplay = typeof own === 'number' ? formatRecoilValue(own) : '-';
+
+                    // Only show combined attachment totals for top-level (parent) rows.
+                    if (combined && row.depth === 0) {
+                        const minVal = combined.min ?? 0;
+                        const maxVal = combined.max ?? 0;
+                        const minDisplay = formatRecoilValue(minVal);
+                        const maxDisplay = formatRecoilValue(maxVal);
+                        const allZero = minVal === 0 && maxVal === 0;
+                        let combinedDisplay;
+                        if (allZero) {
+                            combinedDisplay = '-';
+                        } else if (minVal === maxVal) {
+                            combinedDisplay = minDisplay;
+                        } else {
+                            // Order by absolute magnitude so the smaller magnitude (closer to zero)
+                            // appears first: "-8 to -21%" instead of "-21 to -8%".
+                            if (Math.abs(minVal) <= Math.abs(maxVal)) {
+                                combinedDisplay = `${minDisplay} to ${maxDisplay}`;
+                            } else {
+                                combinedDisplay = `${maxDisplay} to ${minDisplay}`;
+                            }
+                        }
+                        const tooltipContent = (
+                            <div>
+                                <div>
+                                    {row.original.name}: {formatRecoilValue(combined.base ?? 0)}
+                                </div>
+                                {combined.contributions.map((combo) => (
+                                    <div key={`${combo.parentId}-${combo.total}`}>
+                                        {combo.parentName}:{' '}
+                                        {formatRecoilValue(combo.parentValue ?? 0)} →{' '}
+                                        {formatRecoilValue(combo.total ?? 0)}
+                                    </div>
+                                ))}
+                            </div>
+                        );
+                        return (
+                            <Tooltip placement="bottom" title={tooltipContent} arrow>
+                                <CenterCell nowrap>
+                                    <div>{ownDisplay}</div>
+                                    <div style={{ fontSize: '0.85em', opacity: 0.85 }}>
+                                        {combinedDisplay}
+                                    </div>
+                                </CenterCell>
+                            </Tooltip>
+                        );
                     }
-                    return <CenterCell value={value} nowrap />;
+                    return <CenterCell value={ownDisplay} nowrap />;
                 },
                 position: recoilModifier,
             });

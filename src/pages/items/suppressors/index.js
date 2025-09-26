@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Icon } from '@mdi/react';
@@ -14,11 +14,73 @@ import useMetaData from '../../../features/meta/index.js';
 function Suppressors() {
     const [showAllItemSources, setShowAllItemSources] = useState(false);
     const [selectedGun, setSelectedGun] = useState(false);
-    const [showOnlySuppressors, setShowOnlySuppressors] = useState(true);
+    const [showOnlySuppressors, setShowOnlySuppressors] = useState(false);
     const { data: items } = useItemsData();
     const { data: meta } = useMetaData();
 
+    const { muzzleAdaptersHandbookId, suppressorsHandbookId } = useMemo(() => {
+        const handbookCategories = meta?.handbookCategories ?? [];
+        const findId = (normalizedName) =>
+            handbookCategories.find((cat) => cat.normalizedName === normalizedName)?.id;
+
+        return {
+            muzzleAdaptersHandbookId: findId('muzzle-adapters'),
+            suppressorsHandbookId: findId('suppressors'),
+        };
+    }, [meta]);
+
     const { t } = useTranslation();
+
+    const handbookCategoryId = meta?.handbookCategories?.find(
+        (cat) => cat.normalizedName === (showOnlySuppressors ? 'suppressors' : 'muzzle-devices'),
+    )?.id;
+
+    const combineAttachmentStatsFilter = useCallback(
+        (formattedItem, rawItem) => {
+            if (!rawItem) return false;
+            // include items that are in the selected handbook category (suppressors or muzzle-devices)
+            if (handbookCategoryId && Array.isArray(rawItem.handbookCategories)) {
+                if (rawItem.handbookCategories.some((hc) => hc.id === handbookCategoryId))
+                    return true;
+            }
+            // fallback: include anything explicitly typed as 'suppressor' or 'muzzle-device'
+            if (rawItem.types?.includes('suppressor') || rawItem.types?.includes('muzzle-device'))
+                return true;
+            return false;
+        },
+        [handbookCategoryId],
+    );
+
+    const suppressorsCustomFilter = useCallback(
+        (item) => {
+            if (showOnlySuppressors) {
+                return true;
+            }
+
+            if (!Array.isArray(item.handbookCategories) || !muzzleAdaptersHandbookId) {
+                return true;
+            }
+
+            const isMuzzleAdapter = item.handbookCategories.some(
+                (category) => category.id === muzzleAdaptersHandbookId,
+            );
+
+            if (!isMuzzleAdapter) {
+                return true;
+            }
+
+            if (!suppressorsHandbookId) {
+                return false;
+            }
+
+            const isAlsoSuppressor = item.handbookCategories.some(
+                (category) => category.id === suppressorsHandbookId,
+            );
+
+            return isAlsoSuppressor;
+        },
+        [showOnlySuppressors, muzzleAdaptersHandbookId, suppressorsHandbookId],
+    );
 
     const activeGuns = useMemo(() => {
         return items
@@ -41,21 +103,20 @@ function Suppressors() {
 
     return [
         <SEO
-            title={`${t('Suppressors')} - ${t('Escape from Tarkov')} - ${t('Tarkov.dev')}`}
+            title={`${t('Barrel Attachments')} - ${t('Escape from Tarkov')} - ${t('Tarkov.dev')}`}
             description={t(
                 'suppressors-page-description',
-                'This page includes a sortable table with information on the different types of suppressors available in the game, including their ergonomics, recoil, and cheapest price.',
+                'This page includes a sortable table with information on the different types of barrel attachments available in the game, including their ergonomics, recoil, and cheapest price.',
             )}
             key="seo-wrapper"
         />,
         <div className="display-wrapper" key={'display-wrapper'}>
             <div className="page-headline-wrapper">
                 <h1>
-                    {t('Escape from Tarkov')}
                     <Icon path={mdiBottleWine} size={1.5} className="icon-with-text" />
-                    {t('Suppressors')}
+                    {t('Barrel Attachments')}
                 </h1>
-                <Filter center>
+                <Filter center className="barrel-attachments-filter">
                     <ToggleFilter
                         checked={showAllItemSources}
                         label={t('Ignore settings')}
@@ -66,10 +127,10 @@ function Suppressors() {
                     />
                     <ToggleFilter
                         checked={showOnlySuppressors}
-                        label={t('Only suppressors')}
+                        label={t('Only barrel attachments')}
                         onChange={(value) => setShowOnlySuppressors(value)}
                         tooltipContent={t(
-                            'When enabled, show only items of type suppressor; otherwise show all muzzle devices',
+                            'When enabled, show only items of type barrel attachment; otherwise show all muzzle devices',
                         )}
                     />
                     {/* Attachment details are shown by default now; removed toggle to simplify UX */}
@@ -110,18 +171,26 @@ function Suppressors() {
                 ergonomics={1}
                 recoilModifier={2}
                 cheapestPrice={3}
+                combineAttachmentStats={['ergonomics', 'recoilModifier']}
+                combineAttachmentStatsFilter={combineAttachmentStatsFilter}
+                customFilter={suppressorsCustomFilter}
             />
 
-            <div className="page-wrapper suppressors-page-wrapper">
+            <div className="page-wrapper barrel-attachments-page-wrapper">
                 <Trans i18nKey={'suppressors-page-p'}>
                     <p>
                         {
-                            'In Escape from Tarkov, a suppressor is a muzzle device (a functional mod) and can be installed on a weapon to muffle gunshot sound.'
+                            'In Escape from Tarkov, a barrel attachment is a muzzle device (a functional mod) and can be installed on a weapon.'
                         }
                     </p>
                     <p>
                         {
-                            'On this page you can sort them buy ergonomics penalty, recoil improvement or their cost and see on which weapon they can be directly mounted.'
+                            'On this page you can sort them by ergonomics penalty, recoil improvement or their cost and see on which weapon they can be directly mounted.'
+                        }
+                    </p>
+                    <p>
+                        {
+                            'Ergonomics and recoil columns include the totals from any required threads, muzzle devices, or barrels needed to mount each barrel attachment.'
                         }
                     </p>
                 </Trans>
