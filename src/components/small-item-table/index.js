@@ -3,8 +3,8 @@ import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '@mdi/react';
-import { 
-    mdiCloseOctagon, 
+import {
+    mdiCloseOctagon,
     mdiHelpRhombus,
     mdiCached,
     mdiClipboardList,
@@ -24,7 +24,11 @@ import ArrowIcon from '../../components/data-table/Arrow.js';
 
 import formatPrice from '../../modules/format-price.js';
 import itemSearch from '../../modules/item-search.js';
-import { getCheapestBarter, getCheapestCraft, getBarterCost } from '../../modules/format-cost-items.js';
+import {
+    getCheapestBarter,
+    getCheapestCraft,
+    getBarterCost,
+} from '../../modules/format-cost-items.js';
 import { formatCaliber } from '../../modules/format-ammo.mjs';
 import itemCanContain from '../../modules/item-can-contain.js';
 
@@ -50,20 +54,12 @@ function getItemCountPrice(item) {
 
 function TraderSellCell(datum, showSlotValue = false) {
     const { t } = useTranslation();
-    
+
     if (!datum.row.original.sellForTradersBest) {
         return (
             <div className="center-content">
-                <Tooltip
-                    placement="bottom"
-                    title={t("This item can't be sold to traders")}
-                    arrow
-                >
-                    <Icon
-                        path={mdiCloseOctagon}
-                        size={1}
-                        className="icon-with-text"
-                    />
+                <Tooltip placement="bottom" title={t("This item can't be sold to traders")} arrow>
+                    <Icon path={mdiCloseOctagon} size={1} className="icon-with-text" />
                 </Tooltip>
             </div>
         );
@@ -105,24 +101,16 @@ function TraderSellCell(datum, showSlotValue = false) {
             </span>
             <span>
                 {sellForTradersBest.currency !== 'RUB' ? (
-                    <Tooltip
-                        title={formatPrice(priceRUB*count)}
-                        placement="bottom"
-                        arrow
-                    >
-                        <div>
-                            {formatPrice(price*count, sellForTradersBest.currency)}
-                        </div>
+                    <Tooltip title={formatPrice(priceRUB * count)} placement="bottom" arrow>
+                        <div>{formatPrice(price * count, sellForTradersBest.currency)}</div>
                     </Tooltip>
                 ) : (
-                    <div>
-                        {formatPrice(priceRUB*count)}
-                    </div>
+                    <div>{formatPrice(priceRUB * count)}</div>
                 )}
                 {getItemCountPrice(datum.row.original)}
                 {slotValue}
             </span>
-        </div>
+        </div>,
     ];
 }
 
@@ -153,7 +141,11 @@ const getArmorZoneString = (armorZones) => {
         .join(' · ');
 };
 
-const getGuns = (items, targetItem) => {
+const getGuns = (items, targetItem, cache) => {
+    // cache is an optional Map keyed by targetItem.id -> result array
+    if (cache && cache.has(targetItem.id)) {
+        return cache.get(targetItem.id);
+    }
     let parentItems = [];
     const currentParentItems = items.filter((item) => itemCanContain(item, targetItem, 'slots'));
 
@@ -163,23 +155,25 @@ const getGuns = (items, targetItem) => {
             continue;
         }
 
-        parentItems = parentItems.concat(getGuns(items, parentItem));
+        parentItems = parentItems.concat(getGuns(items, parentItem, cache));
     }
-    return parentItems.reduce((parents, current) => {
-        if (!parents.some(item => item.id === current.id)) {
+    const result = parentItems.reduce((parents, current) => {
+        if (!parents.some((item) => item.id === current.id)) {
             parents.push(current);
         }
         return parents;
     }, []);
+    if (cache) cache.set(targetItem.id, result);
+    return result;
 };
 
-const getAttachmentPoints = (items, targetItem) => {
+const getAttachmentPoints = (items, targetItem, cache) => {
     return items
         .filter((parentItem) => itemCanContain(parentItem, targetItem, 'slots'))
         .map((item) => {
             return {
                 ...item,
-                fitsTo: getGuns(items, item),
+                fitsTo: getGuns(items, item, cache),
             };
         });
 };
@@ -288,22 +282,22 @@ function SmallItemTable(props) {
     const skills = useSelector(selectAllSkills);
 
     const { data: meta } = useMetaData();
-    const { materialDestructibilityMap, materialRepairabilityMap } = useMemo(
-        () => {
-            const destruct = {};
-            const repair = {};
-            if (!meta?.armor) return {materialDestructibilityMap: destruct, materialRepairabilityMap: repair };
-            meta.armor.forEach(armor => {
-                destruct[armor.id] = armor.destructibility;
-                repair[armor.id] = (100-Math.round((armor.minRepairDegradation + armor.maxRepairDegradation)/2*100));
-            });
-            return {materialDestructibilityMap: destruct, materialRepairabilityMap: repair };
-        },
-        [meta]
-    );
+    const { materialDestructibilityMap, materialRepairabilityMap } = useMemo(() => {
+        const destruct = {};
+        const repair = {};
+        if (!meta?.armor)
+            return { materialDestructibilityMap: destruct, materialRepairabilityMap: repair };
+        meta.armor.forEach((armor) => {
+            destruct[armor.id] = armor.destructibility;
+            repair[armor.id] =
+                100 -
+                Math.round(((armor.minRepairDegradation + armor.maxRepairDegradation) / 2) * 100);
+        });
+        return { materialDestructibilityMap: destruct, materialRepairabilityMap: repair };
+    }, [meta]);
 
     // Create a constant of all data returned
-    const {data: items, status: itemsStatus} = useItemsData();
+    const { data: items, status: itemsStatus } = useItemsData();
 
     const itemCount = items ? items.length : 0;
     const randomSeeds = useMemo(() => {
@@ -315,7 +309,7 @@ function SmallItemTable(props) {
             seeds.push(Math.random());
         }
         return seeds;
-    },[itemCount, defaultRandom]);
+    }, [itemCount, defaultRandom]);
 
     const { data: barters } = useBartersData();
 
@@ -324,10 +318,9 @@ function SmallItemTable(props) {
     const { data: hideout } = useHideoutData();
 
     const containedItems = useMemo(() => {
-        if (!containedInFilter) 
-            return {};
+        if (!containedInFilter) return {};
         const filterItems = {};
-        containedInFilter.forEach(ci => {
+        containedInFilter.forEach((ci) => {
             if (!ci) {
                 return;
             }
@@ -337,7 +330,9 @@ function SmallItemTable(props) {
     }, [containedInFilter]);
 
     const data = useMemo(() => {
-        const formatItem = itemData => {
+        const gunsCache = new Map();
+
+        const formatItem = (itemData) => {
             const formattedItem = {
                 id: itemData.id,
                 name: itemData.name,
@@ -345,43 +340,68 @@ function SmallItemTable(props) {
                 normalizedName: itemData.normalizedName,
                 avg24hPrice: itemData.avg24hPrice,
                 lastLowPrice: itemData.lastLowPrice,
-                iconLink: itemData.iconLink || `${process.env.PUBLIC_URL}/images/unknown-item-icon.jpg`,
+                iconLink:
+                    itemData.iconLink || `${process.env.PUBLIC_URL}/images/unknown-item-icon.jpg`,
                 instaProfit: 0,
                 itemLink: `/item/${itemData.normalizedName}`,
                 types: itemData.types,
-                buyFor: itemData.buyFor.filter(buyFor => {
-                    if (!showAllSources && !settings.hasFlea && buyFor.vendor.normalizedName === 'flea-market') 
+                buyFor: itemData.buyFor.filter((buyFor) => {
+                    if (
+                        !showAllSources &&
+                        !settings.hasFlea &&
+                        buyFor.vendor.normalizedName === 'flea-market'
+                    )
                         return false;
-                    if (!showAllSources && settings[buyFor.vendor.normalizedName] < buyFor.vendor.minTraderLevel) 
+                    if (
+                        !showAllSources &&
+                        settings[buyFor.vendor.normalizedName] < buyFor.vendor.minTraderLevel
+                    )
                         return false;
-                    if (!showAllSources && settings.useTarkovTracker && buyFor.vendor.taskUnlock && !settings.completedQuests.includes(buyFor.vendor.taskUnlock.id)) 
+                    if (
+                        !showAllSources &&
+                        settings.useTarkovTracker &&
+                        buyFor.vendor.taskUnlock &&
+                        !settings.completedQuests.includes(buyFor.vendor.taskUnlock.id)
+                    )
                         return false;
-                    if (buyFor.vendor.normalizedName === 'flea-market' && traderValue && traderBuyback && (itemData.types.includes('preset') || itemData.lastOfferCount < 2))
+                    if (
+                        buyFor.vendor.normalizedName === 'flea-market' &&
+                        traderValue &&
+                        traderBuyback &&
+                        (itemData.types.includes('preset') || itemData.lastOfferCount < 2)
+                    )
                         return false;
                     return true;
                 }),
                 sellFor: itemData.sellFor,
                 buyOnFleaPrice: itemData.buyFor.find(
-                    (buyPrice) => buyPrice.vendor.normalizedName === 'flea-market' && (showAllSources || settings.hasFlea),
+                    (buyPrice) =>
+                        buyPrice.vendor.normalizedName === 'flea-market' &&
+                        (showAllSources || settings.hasFlea),
                 ),
-                barters: barters.filter(
-                    (barter) => {
-                        if (!barter.rewardItems[0]) {
-                            return false;
-                        }
-                        return barter.rewardItems[0].item.id === itemData.id;
-                    },
-                ),
+                barters: barters.filter((barter) => {
+                    if (!barter.rewardItems[0]) {
+                        return false;
+                    }
+                    return barter.rewardItems[0].item.id === itemData.id;
+                }),
                 grid: itemData.grid,
-                ratio: (itemData.properties.capacity / (itemData.width * itemData.height)).toFixed(2),
+                ratio: (itemData.properties.capacity / (itemData.width * itemData.height)).toFixed(
+                    2,
+                ),
                 size: itemData.properties.capacity,
                 slots: itemData.width * itemData.height,
                 armorClass: itemData.properties.class,
-                armorZone: getArmorZoneString(itemData.properties.zones || itemData.properties.headZones),
+                armorZone: getArmorZoneString(
+                    itemData.properties.zones || itemData.properties.headZones,
+                ),
                 maxDurability: itemData.properties.durability,
-                effectiveDurability: Math.floor(itemData.properties?.durability / materialDestructibilityMap[itemData.properties?.material?.id]),
+                effectiveDurability: Math.floor(
+                    itemData.properties?.durability /
+                        materialDestructibilityMap[itemData.properties?.material?.id],
+                ),
                 repairability: materialRepairabilityMap[itemData.properties?.material?.id],
-                stats: `${Math.round((itemData.properties.speedPenalty || 0) *100)}% / ${Math.round((itemData.properties.turnPenalty || 0) *100)}% / ${itemData.properties.ergoPenalty || 0}`,
+                stats: `${Math.round((itemData.properties.speedPenalty || 0) * 100)}% / ${Math.round((itemData.properties.turnPenalty || 0) * 100)}% / ${itemData.properties.ergoPenalty || 0}`,
                 weight: itemData.weight,
                 properties: itemData.properties,
                 categories: itemData.categories,
@@ -400,7 +420,11 @@ function SmallItemTable(props) {
                     return best;
                 }
 
-                if (!showAllSources && !settings.jaeger && sellFor.vendor.normalizedName === 'jaeger') {
+                if (
+                    !showAllSources &&
+                    !settings.jaeger &&
+                    sellFor.vendor.normalizedName === 'jaeger'
+                ) {
                     return best;
                 }
 
@@ -412,15 +436,22 @@ function SmallItemTable(props) {
             }, undefined);
 
             if (!showAllSources && !settings.hasFlea) {
-                formattedItem.buyOnFleaPrice = 0
+                formattedItem.buyOnFleaPrice = 0;
             }
 
             if (formattedItem.buyOnFleaPrice && formattedItem.buyOnFleaPrice.price > 0) {
-                formattedItem.instaProfit = formattedItem.sellForTradersBest?.priceRUB - formattedItem.buyOnFleaPrice.price;
+                formattedItem.instaProfit =
+                    formattedItem.sellForTradersBest?.priceRUB - formattedItem.buyOnFleaPrice.price;
             }
 
             if (formattedItem.barters.length > 0) {
-                formattedItem.cheapestBarter = getCheapestBarter(itemData, {barters: formattedItem.barters, settings, allowAllSources: showAllSources, useBarterIngredients, useCraftIngredients});
+                formattedItem.cheapestBarter = getCheapestBarter(itemData, {
+                    barters: formattedItem.barters,
+                    settings,
+                    allowAllSources: showAllSources,
+                    useBarterIngredients,
+                    useCraftIngredients,
+                });
             }
             formattedItem.cheapestObtainPrice = Number.MAX_SAFE_INTEGER;
             formattedItem.cheapestObtainInfo = null;
@@ -436,11 +467,23 @@ function SmallItemTable(props) {
                     formattedItem.cheapestObtainInfo = buyFor;
                 }
             }
-            if (!formattedItem.cheapestObtainInfo && (settings.hasFlea || showAllSources) && !traderBuybackFilter) {
-                const cheapestCraft = getCheapestCraft(itemData, {crafts, settings, allowAllSources: showAllSources, useBarterIngredients, useCraftIngredients});
+            if (
+                !formattedItem.cheapestObtainInfo &&
+                (settings.hasFlea || showAllSources) &&
+                !traderBuybackFilter
+            ) {
+                const cheapestCraft = getCheapestCraft(itemData, {
+                    crafts,
+                    settings,
+                    allowAllSources: showAllSources,
+                    useBarterIngredients,
+                    useCraftIngredients,
+                });
                 if (cheapestCraft) {
                     formattedItem.cheapestObtainInfo = cheapestCraft;
-                    formattedItem.cheapestObtainPrice = Math.round(cheapestCraft.price / cheapestCraft.count);
+                    formattedItem.cheapestObtainPrice = Math.round(
+                        cheapestCraft.price / cheapestCraft.count,
+                    );
                 }
             }
             if (formattedItem.cheapestObtainInfo === null) {
@@ -448,26 +491,35 @@ function SmallItemTable(props) {
             }
 
             if (traderBuybackFilter && formattedItem.cheapestObtainPrice) {
-                const thisTraderSell = formattedItem.sellFor.find(sellFor => sellFor.vendor.normalizedName === traderFilter);
+                const thisTraderSell = formattedItem.sellFor.find(
+                    (sellFor) => sellFor.vendor.normalizedName === traderFilter,
+                );
                 if (thisTraderSell) {
-                    formattedItem.buyback = thisTraderSell.priceRUB / formattedItem.cheapestObtainPrice;
+                    formattedItem.buyback =
+                        thisTraderSell.priceRUB / formattedItem.cheapestObtainPrice;
                 }
             }
-            
+
             if (formattedItem.cheapestObtainPrice) {
-                formattedItem.pricePerSlot = showNetPPS ? Math.floor(formattedItem.cheapestObtainPrice / (itemData.properties.capacity - itemData.slots))
-                              : formattedItem.cheapestObtainPrice / itemData.properties.capacity
+                formattedItem.pricePerSlot = showNetPPS
+                    ? Math.floor(
+                          formattedItem.cheapestObtainPrice /
+                              (itemData.properties.capacity - itemData.slots),
+                      )
+                    : formattedItem.cheapestObtainPrice / itemData.properties.capacity;
             }
 
             formattedItem.count = containedItems[itemData.id] || 1;
 
             if (armorSlotFilter && armorZones) {
-                formattedItem.armorZone = getArmorZoneString(armorSlotFilter.reduce((zones, slot) => {
-                    if (slot.allowedPlates.some(plate => plate.id === formattedItem.id)) {
-                        zones.push(...slot.zones);
-                    }
-                    return zones;
-                }, []));
+                formattedItem.armorZone = getArmorZoneString(
+                    armorSlotFilter.reduce((zones, slot) => {
+                        if (slot.allowedPlates.some((plate) => plate.id === formattedItem.id)) {
+                            zones.push(...slot.zones);
+                        }
+                        return zones;
+                    }, []),
+                );
             }
 
             return formattedItem;
@@ -491,7 +543,7 @@ function SmallItemTable(props) {
                     if (!item.types.includes('preset')) {
                         return false;
                     }
-                    const baseItem = items.find(i => i.id === item.properties.baseItem.id);
+                    const baseItem = items.find((i) => i.id === item.properties.baseItem.id);
                     if (!baseItem?.types.includes('gun')) {
                         return false;
                     }
@@ -507,9 +559,7 @@ function SmallItemTable(props) {
                     typeFilterList = [typeFilterList];
                 }
 
-                return item.types.some((itemType) =>
-                    typeFilterList.includes(itemType),
-                );
+                return item.types.some((itemType) => typeFilterList.includes(itemType));
             })
             .filter((item) => {
                 if (!typeLimit) {
@@ -522,9 +572,7 @@ function SmallItemTable(props) {
                     typeLimitList = [typeLimitList];
                 }
 
-                return typeLimitList.every((itemType) =>
-                    item.types.includes(itemType),
-                );
+                return typeLimitList.every((itemType) => item.types.includes(itemType));
             })
             .filter((item) => {
                 if (!excludeTypeFilter) {
@@ -537,9 +585,7 @@ function SmallItemTable(props) {
                     excludeTypeFilterList = [excludeTypeFilterList];
                 }
 
-                return !item.types.some((itemType) =>
-                    excludeTypeFilterList.includes(itemType),
-                );
+                return !item.types.some((itemType) => excludeTypeFilterList.includes(itemType));
             })
             .filter((item) => {
                 if (!minPropertyFilter) {
@@ -572,7 +618,7 @@ function SmallItemTable(props) {
                     categoriesFilter = [categoriesFilter];
                 }
 
-                return item.categories.some(category => categoriesFilter.includes(category.id));
+                return item.categories.some((category) => categoriesFilter.includes(category.id));
             })
             .filter((item) => {
                 if (!handbookCategoryFilter) {
@@ -583,32 +629,42 @@ function SmallItemTable(props) {
                     categoriesFilter = [categoriesFilter];
                 }
 
-                return item.handbookCategories.some(category => categoriesFilter.includes(category.id));
+                return item.handbookCategories.some((category) =>
+                    categoriesFilter.includes(category.id),
+                );
             })
-            .filter(item => {
+            .filter((item) => {
                 if (!containedInFilter) {
                     return true;
                 }
                 return containedItems[item.id];
             })
-            .filter(item => {
+            .filter((item) => {
                 if (!armorSlotFilter) {
                     return true;
                 }
-                return armorSlotFilter.some(slot => slot.allowedPlates.some(plate => plate.id === item.id));
+                return armorSlotFilter.some((slot) =>
+                    slot.allowedPlates.some((plate) => plate.id === item.id),
+                );
             })
-            .filter(item => {
+            .filter((item) => {
                 if (includeBlockingHeadset) {
                     return true;
                 }
                 return !item.properties.blocksHeadset;
             })
-            .filter(item => {
-                if (typeof minPenetration === 'undefined' && typeof maxPenetration === 'undefined') {
+            .filter((item) => {
+                if (
+                    typeof minPenetration === 'undefined' &&
+                    typeof maxPenetration === 'undefined'
+                ) {
                     return true;
                 }
                 const min = minPenetration || 0;
-                let max = typeof maxPenetration === 'undefined' ? Number.MAX_SAFE_INTEGER : maxPenetration;
+                let max =
+                    typeof maxPenetration === 'undefined'
+                        ? Number.MAX_SAFE_INTEGER
+                        : maxPenetration;
                 if (max === 60) {
                     max = Number.MAX_SAFE_INTEGER;
                 }
@@ -618,8 +674,11 @@ function SmallItemTable(props) {
                 }
                 return pen >= min && pen <= max;
             })
-            .filter(item => {
-                if (typeof minDamage === 'undefined' || typeof item.properties?.damage === 'undefined') {
+            .filter((item) => {
+                if (
+                    typeof minDamage === 'undefined' ||
+                    typeof item.properties?.damage === 'undefined'
+                ) {
                     return true;
                 }
                 return item.properties.damage >= minDamage;
@@ -638,7 +697,7 @@ function SmallItemTable(props) {
 
                 return true;
             })
-            .filter(item => {
+            .filter((item) => {
                 if (typeof customFilter !== 'function') {
                     return true;
                 }
@@ -655,7 +714,8 @@ function SmallItemTable(props) {
                 );
 
                 if (item.buyOnFleaPrice) {
-                    item.instaProfit = item.sellForTradersBest?.priceRUB - item.buyOnFleaPrice.price;
+                    item.instaProfit =
+                        item.sellForTradersBest?.priceRUB - item.buyOnFleaPrice.price;
                 } else if (traderBuybackFilter && item.cheapestObtainPrice) {
                     item.instaProfit = item.sellForTradersBest?.priceRUB - item.cheapestObtainPrice;
                 }
@@ -672,7 +732,11 @@ function SmallItemTable(props) {
                     return true;
                 }
 
-                return item.buyFor.some(buy => buy.requirements.some(req => req.type === 'loyaltyLevel' && req.value === loyaltyLevelFilter));
+                return item.buyFor.some((buy) =>
+                    buy.requirements.some(
+                        (req) => req.type === 'loyaltyLevel' && req.value === loyaltyLevelFilter,
+                    ),
+                );
             });
         }
 
@@ -694,8 +758,15 @@ function SmallItemTable(props) {
                 if (loyaltyLevelFilter && barter.level !== loyaltyLevelFilter) {
                     continue;
                 }
-                const barterCost = getBarterCost(barter, {barters, crafts, settings, allowAllSources: showAllSources, useBarterIngredients, useCraftIngredients});
-                const barterItem = items.find(i => i.id === barter.rewardItems[0].item.id);
+                const barterCost = getBarterCost(barter, {
+                    barters,
+                    crafts,
+                    settings,
+                    allowAllSources: showAllSources,
+                    useBarterIngredients,
+                    useCraftIngredients,
+                });
+                const barterItem = items.find((i) => i.id === barter.rewardItems[0].item.id);
                 returnData.push({
                     ...formatItem(barterItem),
                     barter,
@@ -715,49 +786,65 @@ function SmallItemTable(props) {
 
         if (idFilter) {
             const idArray = Array.isArray(idFilter) ? idFilter : [idFilter];
-            returnData = returnData.filter(item => idArray.includes(item.id));
+            returnData = returnData.filter((item) => idArray.includes(item.id));
         }
 
         if (excludeArmor) {
-            returnData = returnData.filter(item => !item.properties.class);
+            returnData = returnData.filter((item) => !item.properties.class);
         }
 
         if (requireArmor) {
-            returnData = returnData.filter(item => item.properties.class);
+            returnData = returnData.filter((item) => item.properties.class);
         }
 
         if (minSlots) {
-            returnData = returnData.filter(item => item.properties.capacity >= minSlots);
+            returnData = returnData.filter((item) => item.properties.capacity >= minSlots);
         }
 
         if (has3Slot) {
-            returnData = returnData.filter(item => item.properties?.grids?.some(grid => grid.width >= 3 || grid.height >= 3));
+            returnData = returnData.filter((item) =>
+                item.properties?.grids?.some((grid) => grid.width >= 3 || grid.height >= 3),
+            );
         }
 
         if (has4Slot) {
-            returnData = returnData.filter(item => item.properties?.grids?.some(grid => grid.width * grid.height >= 4));
+            returnData = returnData.filter((item) =>
+                item.properties?.grids?.some((grid) => grid.width * grid.height >= 4),
+            );
         }
 
         if (softArmorFilter) {
-            returnData = returnData.filter(item => item.properties?.armorSlots?.some(slot => slot.durability && slot.class >= softArmorFilter[0] && slot.class <= softArmorFilter[1]));
+            returnData = returnData.filter((item) =>
+                item.properties?.armorSlots?.some(
+                    (slot) =>
+                        slot.durability &&
+                        slot.class >= softArmorFilter[0] &&
+                        slot.class <= softArmorFilter[1],
+                ),
+            );
         }
         if (plateArmorFilter && (plateArmorFilter[0] !== 0 || plateArmorFilter[1] !== 6)) {
-            returnData = returnData.filter(item => item.properties?.armorSlots?.some(slot => {
-                if (!slot.allowedPlates && plateArmorFilter[1] === 0) {
-                    return true;
-                }
-                if (!slot.allowedPlates) {
-                    return false;
-                }
-                const plateArmorClass = slot.allowedPlates?.reduce((highestClass, current) => {
-                    const plate = items.find(i => i.id === current.id);
-                    if (plate?.properties.class > highestClass) {
-                        return plate.properties.class;
+            returnData = returnData.filter((item) =>
+                item.properties?.armorSlots?.some((slot) => {
+                    if (!slot.allowedPlates && plateArmorFilter[1] === 0) {
+                        return true;
                     }
-                    return highestClass;
-                }, 0);
-                return plateArmorClass >= plateArmorFilter[0] && plateArmorClass <= plateArmorFilter[1];
-            }));
+                    if (!slot.allowedPlates) {
+                        return false;
+                    }
+                    const plateArmorClass = slot.allowedPlates?.reduce((highestClass, current) => {
+                        const plate = items.find((i) => i.id === current.id);
+                        if (plate?.properties.class > highestClass) {
+                            return plate.properties.class;
+                        }
+                        return highestClass;
+                    }, 0);
+                    return (
+                        plateArmorClass >= plateArmorFilter[0] &&
+                        plateArmorClass <= plateArmorFilter[1]
+                    );
+                }),
+            );
         }
 
         if (caliberFilter) {
@@ -767,56 +854,68 @@ function SmallItemTable(props) {
             } else {
                 filterArray.push(...caliberFilter);
             }
-            returnData = returnData.filter(item => {
-                if (caliberFilter.length < 1) 
-                    return true;
-                let caliber = formatCaliber(item.properties.caliber, item.properties.ammoType);
-                if (!caliber) {
-                    return false;
-                }
-                return caliberFilter.includes(caliber);
-            }).sort((a, b) => {
-                const caliberA = formatCaliber(a.properties.caliber, a.properties.ammoType);
-                const caliberB = formatCaliber(b.properties.caliber, b.properties.ammoType);
-                if (caliberA === caliberB) {
-                    const damageA = a.properties.damage;
-                    const damageB = b.properties.damage;
-                    if (damageA === damageB)
-                        return a.name.localeCompare(b.name);
-                    return damageA - damageB;
-                }
-                return caliberA.localeCompare(caliberB);
-            });
+            returnData = returnData
+                .filter((item) => {
+                    if (caliberFilter.length < 1) return true;
+                    let caliber = formatCaliber(item.properties.caliber, item.properties.ammoType);
+                    if (!caliber) {
+                        return false;
+                    }
+                    return caliberFilter.includes(caliber);
+                })
+                .sort((a, b) => {
+                    const caliberA = formatCaliber(a.properties.caliber, a.properties.ammoType);
+                    const caliberB = formatCaliber(b.properties.caliber, b.properties.ammoType);
+                    if (caliberA === caliberB) {
+                        const damageA = a.properties.damage;
+                        const damageB = b.properties.damage;
+                        if (damageA === damageB) return a.name.localeCompare(b.name);
+                        return damageA - damageB;
+                    }
+                    return caliberA.localeCompare(caliberB);
+                });
         }
 
         if (showAttachments) {
-            returnData.forEach(item => {
-                item.subRows = items.filter(linkedItem => {
-                    if (!item.properties?.slots) 
+            returnData.forEach((item) => {
+                item.subRows = items
+                    .filter((linkedItem) => {
+                        if (!item.properties?.slots) return false;
+                        for (const slot of item.properties.slots) {
+                            const included =
+                                slot.filters.allowedItems.includes(linkedItem.id) ||
+                                linkedItem.categoryIds.some((catId) =>
+                                    slot.filters.allowedCategories.includes(catId),
+                                );
+                            const excluded =
+                                slot.filters.excludedItems.includes(linkedItem.id) ||
+                                linkedItem.categoryIds.some((catId) =>
+                                    slot.filters.excludedCategories.includes(catId),
+                                );
+                            if (included && !excluded) return true;
+                        }
                         return false;
-                    for (const slot of item.properties.slots) {
-                        const included = slot.filters.allowedItems.includes(linkedItem.id) ||
-                            linkedItem.categoryIds.some(catId => slot.filters.allowedCategories.includes(catId));
-                        const excluded = slot.filters.excludedItems.includes(linkedItem.id) ||
-                            linkedItem.categoryIds.some(catId => slot.filters.excludedCategories.includes(catId));
-                        if (included && !excluded) 
-                            return true;
-                    }
-                    return false;
-                }).map(item => formatItem(item));
+                    })
+                    .map((item) => formatItem(item));
             });
         }
 
         if (showPresets) {
-            returnData.forEach(item => {
-                item.subRows = items.filter(linkedItem => {
-                    if (!linkedItem.types.includes('preset')){ 
-                        return false;
-                    }
-                    return linkedItem.properties.baseItem.id === item.properties?.baseItem?.id && linkedItem.id !== item.id;
-                }).sort((a, b) => {
-                    return b.name.localeCompare(a.name);
-                }).map(item => formatItem(item));
+            returnData.forEach((item) => {
+                item.subRows = items
+                    .filter((linkedItem) => {
+                        if (!linkedItem.types.includes('preset')) {
+                            return false;
+                        }
+                        return (
+                            linkedItem.properties.baseItem.id === item.properties?.baseItem?.id &&
+                            linkedItem.id !== item.id
+                        );
+                    })
+                    .sort((a, b) => {
+                        return b.name.localeCompare(a.name);
+                    })
+                    .map((item) => formatItem(item));
             });
             returnData.sort((a, b) => {
                 return a.name.localeCompare(b.name);
@@ -824,19 +923,21 @@ function SmallItemTable(props) {
         }
 
         if (attachmentMap) {
-            returnData.forEach(item => {
-                item.subRows = items.filter(attachmentItem => {
-                    return attachmentMap[item.id]?.includes(attachmentItem.id);
-                }).map(item => formatItem(item));
+            returnData.forEach((item) => {
+                item.subRows = items
+                    .filter((attachmentItem) => {
+                        return attachmentMap[item.id]?.includes(attachmentItem.id);
+                    })
+                    .map((item) => formatItem(item));
             });
         }
 
         if (showGunDefaultPresetImages) {
-            returnData.forEach(item => {
+            returnData.forEach((item) => {
                 if (!item.types.includes('gun')) {
                     return;
                 }
-                const preset = items.find(it => it.id === item.properties?.defaultPreset?.id);
+                const preset = items.find((it) => it.id === item.properties?.defaultPreset?.id);
                 if (preset) {
                     item.iconLink = preset.iconLink;
                 }
@@ -844,13 +945,13 @@ function SmallItemTable(props) {
         }
 
         if (showAttachTo || attachesToItemFilter) {
-            returnData.forEach(item => {
-                item.fitsTo = getGuns(items, item);
+            returnData.forEach((item) => {
+                item.fitsTo = getGuns(items, item, gunsCache);
             });
         }
 
         if (attachesToItemFilter) {
-            returnData = returnData.filter(item => {
+            returnData = returnData.filter((item) => {
                 for (const baseItem of item.fitsTo) {
                     if (baseItem.id === attachesToItemFilter.id) {
                         return true;
@@ -862,28 +963,31 @@ function SmallItemTable(props) {
         }
 
         if (showAttachTo) {
-            returnData.forEach(formattedItem => {
-                formattedItem.subRows = getAttachmentPoints(items, formattedItem).filter((item) => {
-                    if (!attachesToItemFilter) {
-                        return true;
-                    }
-
-                    for (const subRow of item.fitsTo) {
-                        if (subRow.id === attachesToItemFilter.id) {
+            returnData.forEach((formattedItem) => {
+                formattedItem.subRows = getAttachmentPoints(items, formattedItem, gunsCache)
+                    .filter((item) => {
+                        if (!attachesToItemFilter) {
                             return true;
                         }
-                    }
 
-                    return false;
-                }).map(parentItem => formatItem(parentItem));
+                        for (const subRow of item.fitsTo) {
+                            if (subRow.id === attachesToItemFilter.id) {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    })
+                    .map((parentItem) => formatItem(parentItem));
             });
         }
 
         if (energy || hydration || hydrationCost || energyCost || provisionValue) {
-            returnData.forEach(item => {
+            returnData.forEach((item) => {
                 const hyd = item.properties.hydration;
                 if (hyd) {
-                    let change = item.properties.hydration * Math.min(skills.metabolism * 0.01, 0.5);
+                    let change =
+                        item.properties.hydration * Math.min(skills.metabolism * 0.01, 0.5);
                     if (change < 0) {
                         change *= -1;
                     }
@@ -965,7 +1069,7 @@ function SmallItemTable(props) {
             return 0;
         }
         let lowHyd = Number.MAX_SAFE_INTEGER;
-        data.forEach(item => {
+        data.forEach((item) => {
             if (item.properties.hydration > 0) {
                 if (item.cheapestObtainPrice) {
                     const hydrationCost = item.cheapestObtainPrice / item.metabolismHydration;
@@ -979,22 +1083,18 @@ function SmallItemTable(props) {
             lowHyd = 0;
         }
         return lowHyd;
-    }, [
-        data,
-        totalEnergyCost,
-        provisionValue,
-    ]);
+    }, [data, totalEnergyCost, provisionValue]);
     const lowEnergyCost = useMemo(() => {
         if (!totalEnergyCost && !provisionValue) {
             return 0;
         }
         let lowEng = Number.MAX_SAFE_INTEGER;
-        data.forEach(item => {
+        data.forEach((item) => {
             if (item.properties.energy > 0) {
                 if (item.cheapestObtainPrice) {
                     let energyCost = item.cheapestObtainPrice / item.metabolismEnergy;
                     if (item.metabolismHydration < 0 && totalEnergyCost) {
-                        const totalHydrationCost = ((item.metabolismHydration * -1) * lowHydrationCost);
+                        const totalHydrationCost = item.metabolismHydration * -1 * lowHydrationCost;
                         const hydrationCostPerEnergy = totalHydrationCost / item.metabolismEnergy;
                         energyCost = energyCost + hydrationCostPerEnergy;
                     }
@@ -1005,22 +1105,14 @@ function SmallItemTable(props) {
             }
         });
         return lowEng;
-    }, [
-        data,
-        totalEnergyCost,
-        lowHydrationCost,
-        provisionValue,
-    ]);
+    }, [data, totalEnergyCost, lowHydrationCost, provisionValue]);
 
     const columns = useMemo(() => {
         const useColumns = [];
         if (showAttachments || showAttachTo || showPresets || attachmentMap) {
             useColumns.push({
                 id: 'expander',
-                Header: ({
-                    getToggleAllRowsExpandedProps,
-                    isAllRowsExpanded,
-                }) =>
+                Header: ({ getToggleAllRowsExpandedProps, isAllRowsExpanded }) =>
                     // <span {...getToggleAllRowsExpandedProps()}>
                     //     {isAllRowsExpanded ? 'v' : '>'}
                     // </span>
@@ -1070,8 +1162,12 @@ function SmallItemTable(props) {
                 id: 'fleaValue',
                 accessor: (d) => Number(d.lastLowPrice),
                 sortType: (a, b, columnId, desc) => {
-                    const aFlea = a.values.fleaValue || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    const bFlea = b.values.fleaValue || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const aFlea =
+                        a.values.fleaValue ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const bFlea =
+                        b.values.fleaValue ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
                     return aFlea - bFlea;
                 },
                 Cell: (allData) => {
@@ -1109,11 +1205,7 @@ function SmallItemTable(props) {
                             value={allData.value}
                             noValue={
                                 <div className="center-content">
-                                    <Tooltip
-                                        placement="bottom"
-                                        title={noValueTip}
-                                        arrow
-                                    >
+                                    <Tooltip placement="bottom" title={noValueTip} arrow>
                                         <Icon
                                             path={noValueIcon}
                                             size={1}
@@ -1137,9 +1229,13 @@ function SmallItemTable(props) {
                 id: 'fleaPrice',
                 accessor: (d) => Number(d.buyOnFleaPrice?.price),
                 sortType: (a, b, columnId, desc) => {
-                    const aFlea = a.values.fleaPrice || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    const bFlea = b.values.fleaPrice || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    
+                    const aFlea =
+                        a.values.fleaPrice ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const bFlea =
+                        b.values.fleaPrice ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+
                     return aFlea - bFlea;
                 },
                 Cell: FleaPriceCell,
@@ -1153,9 +1249,13 @@ function SmallItemTable(props) {
                 id: 'barterPrice',
                 accessor: (d) => Number(d.cheapestBarter?.price),
                 sortType: (a, b, columnId, desc) => {
-                    const aBart = a.values.barterPrice || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    const bBart = b.values.barterPrice || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    
+                    const aBart =
+                        a.values.barterPrice ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const bBart =
+                        b.values.barterPrice ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+
                     return aBart - bBart;
                 },
                 Cell: (props) => {
@@ -1199,9 +1299,13 @@ function SmallItemTable(props) {
                 accessor: 'instaProfit',
                 sortDescFirst: true,
                 sortType: (a, b, columnId, desc) => {
-                    const aInsta = a.values.instaProfit || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    const bInsta = b.values.instaProfit || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    
+                    const aInsta =
+                        a.values.instaProfit ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const bInsta =
+                        b.values.instaProfit ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+
                     return aInsta - bInsta;
                 },
                 Cell: ValueCell,
@@ -1227,7 +1331,7 @@ function SmallItemTable(props) {
                     if (d.barter) {
                         return d.barterCost;
                     }
-                    return Number(d.buyFor[0]?.priceRUB || 0)
+                    return Number(d.buyFor[0]?.priceRUB || 0);
                 },
                 Cell: (props) => {
                     if (props.row.original.barter) {
@@ -1252,8 +1356,12 @@ function SmallItemTable(props) {
                                 />
                             );
                             barterTipTitle = (
-                                <Link to={`/task/${props.row.original.barter.taskUnlock.normalizedName}`}>
-                                    {t('Task: {{taskName}}', {taskName: props.row.original.barter.taskUnlock.name})}
+                                <Link
+                                    to={`/task/${props.row.original.barter.taskUnlock.normalizedName}`}
+                                >
+                                    {t('Task: {{taskName}}', {
+                                        taskName: props.row.original.barter.taskUnlock.name,
+                                    })}
                                 </Link>
                             );
                         }
@@ -1271,8 +1379,16 @@ function SmallItemTable(props) {
                         );
                         const displayedPrice = [priceSource, barterIcon, taskIcon];
                         const priceContent = [];
-                        priceContent.push((<div key="price-info">{formatPrice(props.value*props.row.original.count)}</div>));
-                        priceContent.push((<div key="price-source-info" className="trader-unlock-wrapper">{displayedPrice}</div>));
+                        priceContent.push(
+                            <div key="price-info">
+                                {formatPrice(props.value * props.row.original.count)}
+                            </div>,
+                        );
+                        priceContent.push(
+                            <div key="price-source-info" className="trader-unlock-wrapper">
+                                {displayedPrice}
+                            </div>,
+                        );
                         return (
                             <ConditionalWrapper
                                 condition={tipContent}
@@ -1284,9 +1400,7 @@ function SmallItemTable(props) {
                                     );
                                 }}
                             >
-                                <div className="center-content">
-                                    {priceContent}
-                                </div>
+                                <div className="center-content">{priceContent}</div>
                             </ConditionalWrapper>
                         );
                     } else {
@@ -1307,7 +1421,9 @@ function SmallItemTable(props) {
                 Cell: ({ value }) => {
                     return (
                         <Tooltip
-                            title={t('The percent recovered if you buy this item and sell it to the trader')}
+                            title={t(
+                                'The percent recovered if you buy this item and sell it to the trader',
+                            )}
                             arrow
                         >
                             <div className="center-content">
@@ -1327,10 +1443,10 @@ function SmallItemTable(props) {
                 accessor: 'grid',
                 sortType: (a, b, columnId, desc) => {
                     const aSize = a.values.grid.pockets.reduce((totalSize, pocket) => {
-                        return totalSize += (pocket.width * pocket.height);
+                        return (totalSize += pocket.width * pocket.height);
                     }, 0);
                     const bSize = b.values.grid.pockets.reduce((totalSize, pocket) => {
-                        return totalSize += (pocket.width * pocket.height);
+                        return (totalSize += pocket.width * pocket.height);
                     }, 0);
                     return aSize - bSize;
                 },
@@ -1363,7 +1479,7 @@ function SmallItemTable(props) {
                 id: 'innerSize',
                 accessor: 'size',
                 Cell: CenterCell,
-                position: innerSize
+                position: innerSize,
             });
         }
 
@@ -1383,9 +1499,13 @@ function SmallItemTable(props) {
                 id: 'pricePerSlot',
                 accessor: 'pricePerSlot',
                 sortType: (a, b, columnId, desc) => {
-                    const aPPS = a.values.pricePerSlot || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    const bPPS = b.values.pricePerSlot || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    
+                    const aPPS =
+                        a.values.pricePerSlot ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const bPPS =
+                        b.values.pricePerSlot ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+
                     return aPPS - bPPS;
                 },
                 Cell: ValueCell,
@@ -1401,15 +1521,14 @@ function SmallItemTable(props) {
                 sortType: (a, b) => {
                     const aArmor = a.values.armorClass;
                     const bArmor = b.values.armorClass;
-                    if (aArmor===bArmor) {
+                    if (aArmor === bArmor) {
                         if (effectiveDurability)
                             return a.values.effectiveDurability - b.values.effectiveDurability;
                         else if (blindnessProtection)
                             return a.values.blindnessProtection - b.values.blindnessProtection;
-                        else
-                            return a.values.maxDurability - b.values.maxDurability;
+                        else return a.values.maxDurability - b.values.maxDurability;
                     }
-                    
+
                     return aArmor - bArmor;
                 },
                 Cell: CenterCell,
@@ -1484,7 +1603,9 @@ function SmallItemTable(props) {
                     return ratio.toFixed(2);
                 },
                 sortType: (a, b) => {
-                    return (a.values.innerSize / a.values.weight) - (b.values.innerSize / b.values.weight);
+                    return (
+                        a.values.innerSize / a.values.weight - b.values.innerSize / b.values.weight
+                    );
                 },
                 Cell: CenterCell,
                 position: slotsPerWeight,
@@ -1514,8 +1635,7 @@ function SmallItemTable(props) {
                 id: 'caliber',
                 accessor: (item) => {
                     let caliber = item.properties.caliber;
-                    if (!caliber) 
-                        return '-';
+                    if (!caliber) return '-';
                     caliber = formatCaliber(caliber, item.properties.ammoType);
                     return caliber;
                 },
@@ -1528,7 +1648,10 @@ function SmallItemTable(props) {
             useColumns.push({
                 Header: t('Damage'),
                 id: 'damage',
-                accessor: (ammoData) => useAllProjectileDamage ? ammoData.properties.projectileCount * ammoData.properties.damage : ammoData.properties.damage,
+                accessor: (ammoData) =>
+                    useAllProjectileDamage
+                        ? ammoData.properties.projectileCount * ammoData.properties.damage
+                        : ammoData.properties.damage,
                 Cell: CenterCell,
                 position: damage,
             });
@@ -1574,14 +1697,16 @@ function SmallItemTable(props) {
                     if (!value) {
                         valueStr = '-';
                     } else {
-                        valueStr = `${value*100}%`;
+                        valueStr = `${value * 100}%`;
                     }
                     return <CenterCell value={valueStr} nowrap />;
                 },
                 position: blindnessProtection,
                 sortType: (a, b) => {
                     console.log(a);
-                    return (a.values.blindnessProtection ?? 0) - (b.values.blindnessProtection ?? 0);
+                    return (
+                        (a.values.blindnessProtection ?? 0) - (b.values.blindnessProtection ?? 0)
+                    );
                 },
             });
         }
@@ -1626,7 +1751,7 @@ function SmallItemTable(props) {
                     if (!value) {
                         value = '-';
                     } else if (value === Number.MAX_SAFE_INTEGER) {
-                        value = '∞'
+                        value = '∞';
                     } else {
                         value = formatPrice(value);
                     }
@@ -1647,19 +1772,28 @@ function SmallItemTable(props) {
                     if (!item.metabolismEnergy || item.metabolismEnergy < 0) {
                         return Number.MAX_SAFE_INTEGER;
                     }
-                    
+
                     let hydrationCostPerEnergyUnit = 0;
-                    if (item.metabolismHydration && item.metabolismHydration < 0 && totalEnergyCost) {
-                        const totalHydrationCost = (item.metabolismHydration * -1) * lowHydrationCost;
-                        hydrationCostPerEnergyUnit = Math.round(totalHydrationCost / item.metabolismEnergy);
+                    if (
+                        item.metabolismHydration &&
+                        item.metabolismHydration < 0 &&
+                        totalEnergyCost
+                    ) {
+                        const totalHydrationCost = item.metabolismHydration * -1 * lowHydrationCost;
+                        hydrationCostPerEnergyUnit = Math.round(
+                            totalHydrationCost / item.metabolismEnergy,
+                        );
                     }
-                    return (item.cheapestObtainPrice / item.metabolismEnergy) + hydrationCostPerEnergyUnit;
+                    return (
+                        item.cheapestObtainPrice / item.metabolismEnergy +
+                        hydrationCostPerEnergyUnit
+                    );
                 },
                 Cell: ({ value }) => {
                     if (!value) {
                         value = '-';
                     } else if (value === Number.MAX_SAFE_INTEGER) {
-                        value = '∞'
+                        value = '∞';
                     } else {
                         value = formatPrice(value);
                     }
@@ -1688,7 +1822,7 @@ function SmallItemTable(props) {
                     if (!value) {
                         value = '-';
                     } else if (value === Number.MAX_SAFE_INTEGER) {
-                        value = '∞'
+                        value = '∞';
                     } else {
                         value = formatPrice(value);
                     }
@@ -1714,7 +1848,7 @@ function SmallItemTable(props) {
             useColumns.push({
                 Header: t('Blocks earpiece'),
                 id: 'blocksHeadset',
-                accessor: (item) => item.properties.blocksHeadset ? t('Yes') : t('No'),
+                accessor: (item) => (item.properties.blocksHeadset ? t('Yes') : t('No')),
                 Cell: CenterCell,
                 position: blocksHeadset,
             });
@@ -1728,13 +1862,11 @@ function SmallItemTable(props) {
                 sortType: (a, b, columnId, desc) => {
                     const aErgo = a.values.ergonomics;
                     const bErgo = b.values.ergonomics;
-                    if (aErgo===bErgo) {
-                        if (desc)
-                            return b.values.ergoCost - a.values.ergoCost;
-                        else
-                            return a.values.ergoCost - b.values.ergoCost;
+                    if (aErgo === bErgo) {
+                        if (desc) return b.values.ergoCost - a.values.ergoCost;
+                        else return a.values.ergoCost - b.values.ergoCost;
                     }
-                    
+
                     return aErgo - bErgo;
                 },
                 Cell: CenterCell,
@@ -1753,15 +1885,19 @@ function SmallItemTable(props) {
                     return 0;
                 },
                 sortType: (a, b, columnId, desc) => {
-                    const aErgoCost = a.values.ergoCost || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    const bErgoCost = b.values.ergoCost || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const aErgoCost =
+                        a.values.ergoCost ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const bErgoCost =
+                        b.values.ergoCost ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
                     return aErgoCost - bErgoCost;
                 },
                 Cell: ({ value }) => {
                     if (!value) {
                         value = '-';
                     } else if (value === Number.MAX_SAFE_INTEGER) {
-                        value = '-'
+                        value = '-';
                     } else {
                         value = formatPrice(value);
                     }
@@ -1779,9 +1915,9 @@ function SmallItemTable(props) {
                 sortType: (a, b) => {
                     return b.values.recoilModifier - a.values.recoilModifier;
                 },
-                Cell: ({value}) => {
+                Cell: ({ value }) => {
                     if (!value) {
-                        value = '-'
+                        value = '-';
                     } else {
                         value = `${Math.round(value * 100)}%`;
                     }
@@ -1799,9 +1935,9 @@ function SmallItemTable(props) {
                 sortType: (a, b) => {
                     return b.values.distanceModifier - a.values.distanceModifier;
                 },
-                Cell: ({value}) => {
+                Cell: ({ value }) => {
                     if (!value) {
-                        value = '-'
+                        value = '-';
                     }
                     return <CenterCell value={value} nowrap />;
                 },
@@ -1815,8 +1951,12 @@ function SmallItemTable(props) {
                 id: 'cheapestPrice',
                 accessor: 'cheapestObtainPrice',
                 sortType: (a, b, columnId, desc) => {
-                    const aCheap = a.values.cheapestPrice || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
-                    const bCheap = b.values.cheapestPrice || (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const aCheap =
+                        a.values.cheapestPrice ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+                    const bCheap =
+                        b.values.cheapestPrice ||
+                        (desc ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
                     return aCheap - bCheap;
                 },
                 Cell: (props) => {
@@ -1831,8 +1971,7 @@ function SmallItemTable(props) {
                         if (!cheapestObtainInfo.barter && !cheapestObtainInfo.craft) {
                             if (cheapestObtainInfo.vendor.normalizedName === 'flea-market') {
                                 priceSource = cheapestObtainInfo.vendor.name;
-                            }
-                            else {
+                            } else {
                                 priceSource = `${cheapestObtainInfo.vendor.name} ${t('LL{{level}}', { level: cheapestObtainInfo.vendor.minTraderLevel })}`;
                             }
                             if (cheapestObtainInfo.vendor.taskUnlock) {
@@ -1846,8 +1985,12 @@ function SmallItemTable(props) {
                                 );
                                 tipContent = (
                                     <div>
-                                        <Link to={`/task/${cheapestObtainInfo.vendor.taskUnlock.normalizedName}`}>
-                                            {t('Task: {{taskName}}', {taskName: cheapestObtainInfo.vendor.taskUnlock.name})}
+                                        <Link
+                                            to={`/task/${cheapestObtainInfo.vendor.taskUnlock.normalizedName}`}
+                                        >
+                                            {t('Task: {{taskName}}', {
+                                                taskName: cheapestObtainInfo.vendor.taskUnlock.name,
+                                            })}
                                         </Link>
                                     </div>
                                 );
@@ -1873,8 +2016,12 @@ function SmallItemTable(props) {
                                     />
                                 );
                                 barterTipTitle = (
-                                    <Link to={`/task/${cheapestObtainInfo.barter.taskUnlock.normalizedName}`}>
-                                        {t('Task: {{taskName}}', {taskName: cheapestObtainInfo.barter.taskUnlock.name})}
+                                    <Link
+                                        to={`/task/${cheapestObtainInfo.barter.taskUnlock.normalizedName}`}
+                                    >
+                                        {t('Task: {{taskName}}', {
+                                            taskName: cheapestObtainInfo.barter.taskUnlock.name,
+                                        })}
                                     </Link>
                                 );
                             }
@@ -1892,7 +2039,7 @@ function SmallItemTable(props) {
                             );
                         } else if (cheapestObtainInfo.craft) {
                             const craft = cheapestObtainInfo.craft;
-                            const station = hideout.find(s => s.id === craft.station.id);
+                            const station = hideout.find((s) => s.id === craft.station.id);
                             priceSource = `${station.name} ${craft.level}`;
                             let barterTipTitle = '';
                             if (craft.taskUnlock) {
@@ -1906,7 +2053,9 @@ function SmallItemTable(props) {
                                 );
                                 barterTipTitle = (
                                     <Link to={`/task/${craft.taskUnlock.normalizedName}`}>
-                                        {t('Task: {{taskName}}', {taskName: craft.taskUnlock.name})}
+                                        {t('Task: {{taskName}}', {
+                                            taskName: craft.taskUnlock.name,
+                                        })}
                                     </Link>
                                 );
                             }
@@ -1926,38 +2075,44 @@ function SmallItemTable(props) {
                         displayedPrice.push(priceSource);
                         displayedPrice.push(barterIcon);
                         displayedPrice.push(taskIcon);
-                        priceContent.push((<div key="price-info">{formatPrice(props.value*props.row.original.count)}</div>));
-                        priceContent.push((<div key="price-source-info" className="trader-unlock-wrapper">{displayedPrice}</div>));
+                        priceContent.push(
+                            <div key="price-info">
+                                {formatPrice(props.value * props.row.original.count)}
+                            </div>,
+                        );
+                        priceContent.push(
+                            <div key="price-source-info" className="trader-unlock-wrapper">
+                                {displayedPrice}
+                            </div>,
+                        );
                     } else {
                         tipContent = [];
                         if (props.row.original.types.includes('noFlea')) {
-                            priceContent.push((
+                            priceContent.push(
                                 <Icon
                                     path={mdiCloseOctagon}
                                     size={1}
                                     className="icon-with-text"
                                     key="no-flea-icon"
-                                />
-                            ));
-                            tipContent.push((
+                                />,
+                            );
+                            tipContent.push(
                                 <div key={'no-flea-tooltip'}>
-                                    {t('This item can\'t be sold on the Flea Market')}
-                                </div>
-                            ));
+                                    {t("This item can't be sold on the Flea Market")}
+                                </div>,
+                            );
                         } else if (!settings.hasFlea) {
-                            priceContent.push((
+                            priceContent.push(
                                 <Icon
                                     path={mdiCloseOctagon}
                                     size={1}
                                     className="icon-with-text"
                                     key="no-prices-icon"
-                                />
-                            ));
-                            tipContent.push((
-                                <div key={'no-flea-tooltip'}>
-                                    {t('Flea Market not available')}
-                                </div>
-                            ));
+                                />,
+                            );
+                            tipContent.push(
+                                <div key={'no-flea-tooltip'}>{t('Flea Market not available')}</div>,
+                            );
                         } else {
                             let tipText = t('Not scanned on the Flea Market');
                             let icon = mdiHelpRhombus;
@@ -1965,25 +2120,21 @@ function SmallItemTable(props) {
                                 tipText = t('Flea market prices loading');
                                 icon = mdiTimerSand;
                             }
-                            priceContent.push((
+                            priceContent.push(
                                 <Icon
                                     path={icon}
                                     size={1}
                                     className="icon-with-text"
                                     key="no-prices-icon"
-                                />
-                            ));
-                            tipContent.push((
-                                <div key={'no-flea-tooltip'}>
-                                    {tipText}
-                                </div>
-                            ));
+                                />,
+                            );
+                            tipContent.push(<div key={'no-flea-tooltip'}>{tipText}</div>);
                         }
-                        tipContent.push((
+                        tipContent.push(
                             <div key={'no-trader-sell-tooltip'}>
                                 {t('No trader offers available')}
-                            </div>
-                        ));
+                            </div>,
+                        );
                     }
                     return (
                         <ConditionalWrapper
@@ -1996,9 +2147,7 @@ function SmallItemTable(props) {
                                 );
                             }}
                         >
-                            <div className="center-content">
-                                {priceContent}
-                            </div>
+                            <div className="center-content">{priceContent}</div>
                         </ConditionalWrapper>
                     );
                 },
@@ -2019,7 +2168,7 @@ function SmallItemTable(props) {
                     position = 1;
                 }
                 if (position >= useColumns.length) {
-                    position = useColumns.length-1;
+                    position = useColumns.length - 1;
                 }
                 if (position !== i && !claimedPositions.includes(position)) {
                     //console.log(`Moving ${column.Header} from ${i} to ${position}`);
